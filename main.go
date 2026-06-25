@@ -11,6 +11,7 @@ import (
 	"image/png"
 	"gonum.org/v1/gonum/mat"
 	"math/cmplx"
+	"sort"
 )
 // type Pixel struct {
 // 	[3]uint8 // RGB
@@ -140,7 +141,7 @@ func (frm *Frame) Gradient(vertical bool) *Frame {
 }
 
 
-func shiTomasi(frm *Frame, windowWidth int, windowHeight int) *Frame {
+func shiTomasi(frm *Frame, windowWidth int, windowHeight int) [][3]float64 {
 	// convert to grayscale
 	grayFrm := frm.Grayscale()
 
@@ -204,20 +205,46 @@ func shiTomasi(frm *Frame, windowWidth int, windowHeight int) *Frame {
 		}
 	}
 
-	thresholdR := float64(maxR * 0.01)
+	thresholdR := float64(maxR * 0.1)
 	fmt.Printf("threshold %v\n", thresholdR)
 	
-	outputFrm := makeFrame(frameWidth, frameHeight, 1)
-	outputFrm.FillFrame(grayFrm.pixels)
-	for x := 0; x < outputFrm.GetWidth(); x++ {
-		for y := 0; y < outputFrm.GetHeight(); y++ {
-			if rFrame.GetPixelAt(x,y)[0] >= thresholdR {
-				outputFrm.SetPixelAt(x,y, []float64{1, 1, 1, 1})
+	intermediateCoords := make([][3]float64, 0)
+
+	for wx := 0; wx < frameWidth/windowWidth; wx++ {
+		for wy := 0; wy < frameHeight/windowHeight; wy++ {
+			midX := wx*windowWidth + windowWidth/2
+			midY := wy*windowHeight + windowHeight/2
+			rValue := rFrame.GetPixelAt(midX, midY)[0] 
+			if rValue >= thresholdR {
+				intermediateCoords = append(intermediateCoords, [3]float64{float64(midX), float64(midY), rValue})
 			}
 		}
 	}
 
-	return outputFrm
+	sort.Slice(intermediateCoords, func(i,j int) bool {
+		return intermediateCoords[i][2] < intermediateCoords[j][2]
+	})
+	return intermediateCoords[:100]
+
+}
+
+func displayST(frm *Frame, coords [][3]float64, windowWidth, windowHeight int) {
+	withCorners := makeFrame(frm.GetWidth(), frm.GetHeight(), frm.GetChannels())
+	withCorners.FillFrame(frm.pixels)
+	for _, coord := range coords {
+		midX := int(coord[0])
+		midY := int(coord[1])
+		for wx := -windowWidth/2; wx <= windowWidth/2; wx++ {
+			for wy := -windowHeight/2; wy <= windowHeight/2; wy++ {
+				withCorners.SetPixelAt(midX+wx, midY+wy, []float64{1,1,1,1})
+			}
+		}
+	}
+
+	grayFrame := withCorners.Grayscale()
+	grayImg := getGrayscaleImg(grayFrame)
+	saveToPNG(grayImg, "./display.png")
+
 }
 
 
@@ -237,10 +264,8 @@ func main() {
 
 	// Loop through every frame in the video
 	for video.Read() {
-		// FrameBuffer returns a byte array of the frame in row-major order (RGB format)
+		// FrameBuffer returns a byte array of the frame in row-major order (RGBA format)
 		rawFrame := video.FrameBuffer()
-		// frame is []uint8
-		// [R0, G0, B0, A0, R1, ...]
 		rawFrameFloats := make([]float64, len(rawFrame))
 		for i := range rawFrameFloats {
 			rawFrameFloats[i] = float64(rawFrame[i]) / 255.0
@@ -248,11 +273,8 @@ func main() {
 		frame := makeFrame(frame_width, frame_height, frame_channels)
 		frame.FillFrame(rawFrameFloats)
 
-		withCorners := shiTomasi(frame, 5, 5)
-		// grayFrame := frame.Grayscale()
-		grayImg := getGrayscaleImg(withCorners)
-		// saveToPNG(grayImg, "./second.png")
-		saveToPNG(grayImg, "./first.png")
+		corners := shiTomasi(frame, 5, 5)
+		displayST(frame, corners, 5,5)
 		break
 	}
 }
