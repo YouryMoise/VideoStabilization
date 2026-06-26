@@ -12,6 +12,7 @@ import (
 	"gonum.org/v1/gonum/mat"
 	"math/cmplx"
 	"sort"
+	"math"
 )
 // type Pixel struct {
 // 	[3]uint8 // RGB
@@ -66,11 +67,58 @@ func (frm *Frame) GetChannels() int {
 	return frm.channels
 }
 
-func (frm *Frame) GetPixelAt(x int, y int) []float64{
+func (frm *Frame) GetPixelAt(x, y int) []float64{
 	index := y * frm.GetWidth() + x
 	channels := frm.GetChannels()
 	return frm.pixels[index*channels:index*channels+channels]
 }
+
+func (frm *Frame) InterpolatePixelAt(x, y float64) []float64{
+	// interpolate x value along top and bottom y
+	// interpolate y value along those x values
+	leftX := int(x)
+	rightX := int(math.Ceil(x))
+	if rightX == leftX {
+		rightX++
+	}
+	topY := int(y)
+	bottomY := int(math.Ceil(y))
+	if bottomY == topY {
+		bottomY++
+	}
+
+	topLeftValue := frm.GetPixelAt(leftX, topY)
+	topRightValue := frm.GetPixelAt(rightX, topY)
+	bottomLeftValue := frm.GetPixelAt(leftX, bottomY)
+	bottomRightValue := frm.GetPixelAt(rightX, bottomY)
+
+	c := frm.GetChannels()
+	topInterpolated := make([]float64, c)
+	bottomInterpolated := make([]float64, c)
+	fullInterpolated := make([]float64, c)
+	
+	if c == 4 {
+		topInterpolated[3] = 1
+		bottomInterpolated[3] = 1
+		fullInterpolated[3] = 1
+	}
+
+
+	xRatio := (x-float64(leftX))/(float64(rightX-leftX)) // always 1.0 on the bottom
+	yRatio := (y-float64(topY))/(float64(bottomY-topY))
+	
+	for i := 0; i < c; i++ {
+		if i == 3 {
+			break
+		}
+		topInterpolated[i] = topLeftValue[i]*(1-xRatio) + topRightValue[i]*xRatio
+		bottomInterpolated[i] = bottomLeftValue[i]*(1-xRatio) + bottomRightValue[i]*xRatio
+		fullInterpolated[i] = topInterpolated[i]*(1-yRatio) + bottomInterpolated[i]*yRatio
+	}
+	// fmt.Printf("x %v y %v fullInterp %v\n",x, y, fullInterpolated)
+	return fullInterpolated
+}
+
 
 func (frm *Frame) SetPixelAt(x int, y int, value []float64){
 	index := y * frm.GetWidth() + x
@@ -141,7 +189,7 @@ func (frm *Frame) Gradient(vertical bool) *Frame {
 }
 
 
-func shiTomasi(frm *Frame, windowWidth int, windowHeight int) [][3]float64 {
+func shiTomasi(frm *Frame, windowWidth, windowHeight int) [][2]float64 {
 	// convert to grayscale
 	grayFrm := frm.Grayscale()
 
@@ -224,11 +272,99 @@ func shiTomasi(frm *Frame, windowWidth int, windowHeight int) [][3]float64 {
 	sort.Slice(intermediateCoords, func(i,j int) bool {
 		return intermediateCoords[i][2] < intermediateCoords[j][2]
 	})
-	return intermediateCoords[:100]
+
+	n := min(100, len(intermediateCoords))
+	outputCoords := make([][2]float64, n)
+
+	for i, c := range intermediateCoords[:n] {
+		outputCoords[i] = [2]float64{c[0], c[1]}
+	}
+	// var outputCoords [][2]float64 = [][2]float64(intermediateCoords[:100][:2]) 
+	return outputCoords
 
 }
 
-func displayST(frm *Frame, coords [][3]float64, windowWidth, windowHeight int) {
+func lucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points [][2]float64) [][2]float64 {
+	// will need to redo this and shiTomasi to have less repeated code
+	/* for each window
+	get the sum(Ix2), Sum(Iy2), sum(IxIy) from the old frame
+	get the I_t by doing newFrame-oldFrame
+	left matrix is sIx2, sIxIy, sIxIy, sIy2
+	vector is u,v
+	right matrix is -(sIxIt, sIyIt)
+	solve for u,v; u gives x change, v gives y change
+	use these to update the point information */
+	grayOld := oldFrm.Grayscale()
+	grayFrm := newFrm.Grayscale()
+
+	Ix := grayFrm.Gradient(false)
+	Iy := grayFrm.Gradient(true)
+	
+	IxIt := makeFrame(grayFrm.GetWidth(), grayFrm.GetHeight(), grayFrm.GetChannels())
+	IyIt := makeFrame(grayFrm.GetWidth(), grayFrm.GetHeight(), grayFrm.GetChannels())
+	Ix2 := makeFrame(grayFrm.GetWidth(), grayFrm.GetHeight(), grayFrm.GetChannels())
+	Iy2 := makeFrame(grayFrm.GetWidth(), grayFrm.GetHeight(), grayFrm.GetChannels())
+	IxIy := makeFrame(grayFrm.GetWidth(), grayFrm.GetHeight(), grayFrm.GetChannels())
+	for x := range grayFrm.GetWidth() {
+		for y := range grayFrm.GetHeight() {
+			oldValue := grayOld.GetPixelAt(x,y)[0]
+			newValue := grayFrm.GetPixelAt(x,y)[0]
+			IxValue := Ix.GetPixelAt(x,y)[0]
+			IyValue := Iy.GetPixelAt(x,y)[0]
+			Ix2.SetPixelAt(x,y,[]float64{IxValue*IxValue})
+			Iy2.SetPixelAt(x,y,[]float64{IyValue*IyValue})
+			IxIy.SetPixelAt(x,y,[]float64{IxValue*IyValue})
+			IxIt.SetPixelAt(x,y, []float64{(newValue-oldValue)*IxValue})
+			IyIt.SetPixelAt(x,y, []float64{(newValue-oldValue)*IyValue})
+		}
+	}
+
+	outputPoints := make([][2]float64, 0)
+
+	for _, point := range points {
+		x := point[0]
+		y := point[1]
+		sumIx2 := 0.0
+		sumIy2 := 0.0
+		sumIxIy := 0.0
+		sumIxIt := 0.0
+		sumIyIt := 0.0
+
+		for wx := -windowWidth/2; wx <= windowWidth/2; wx++ {
+			for wy := -windowHeight/2; wy <= windowHeight/2; wy++ {
+				sumIx2 += Ix.InterpolatePixelAt(x,y)[0]
+				sumIy2 += Iy.InterpolatePixelAt(x,y)[0]
+				sumIxIy += IxIy.InterpolatePixelAt(x,y)[0]
+				sumIxIt += IxIt.InterpolatePixelAt(x,y)[0]
+				sumIyIt += IyIt.InterpolatePixelAt(x,y)[0]
+			}
+		}
+
+		A := mat.NewDense(2,2, []float64{sumIx2, sumIxIy, sumIxIy, sumIy2})
+		b := mat.NewVecDense(2, []float64{sumIxIt, sumIyIt})
+		// fmt.Printf("A %v b %v\n", A, b)
+		var uv mat.VecDense
+		err := uv.SolveVec(A, b)
+		if err != nil {
+			// fmt.Printf("Error solving system: %v\n", err)
+			continue
+		}
+		xChange := uv.RawVector().Data[0]
+		yChange := uv.RawVector().Data[1]
+
+		// fmt.Printf("uvRaw %v xChange %v yChange %v\n",uv.RawVector(), xChange, yChange)
+
+		newX := x + xChange
+		newY := y + yChange
+		outputPoints = append(outputPoints, [2]float64{newX, newY})
+	}
+
+	return outputPoints
+	
+	
+}
+
+func displayST(frm *Frame, coords [][2]float64, windowWidth, windowHeight int) {
 	withCorners := makeFrame(frm.GetWidth(), frm.GetHeight(), frm.GetChannels())
 	withCorners.FillFrame(frm.pixels)
 	for _, coord := range coords {
@@ -263,6 +399,9 @@ func main() {
 	frame_channels := 4
 
 	// Loop through every frame in the video
+	counter := 0
+	var oldFrm *Frame
+	allCorners := make([][][2]float64,0)
 	for video.Read() {
 		// FrameBuffer returns a byte array of the frame in row-major order (RGBA format)
 		rawFrame := video.FrameBuffer()
@@ -273,8 +412,27 @@ func main() {
 		frame := makeFrame(frame_width, frame_height, frame_channels)
 		frame.FillFrame(rawFrameFloats)
 
-		corners := shiTomasi(frame, 5, 5)
-		displayST(frame, corners, 5,5)
-		break
+		// if frame 0, get corners using shiTomasi; save f0 as "oldFrame" and continue
+		// otherwise, use shiTomasi to get corners, do thisFrame-oldFrame for I_t
+		// still using the Ix and Iy of the previous frame though
+		if counter == 0 {
+			corners := shiTomasi(frame, 5, 5)
+			allCorners = append(allCorners, corners)
+			// displayST(frame, corners, 5,5)
+			oldFrm = frame
+
+		} else {
+			fmt.Printf("calling lk with corners %v\n", allCorners)
+			corners := lucasKanade(oldFrm, frame, 5, 5, allCorners[len(allCorners)-1])
+			fmt.Printf("new corners %v\n", corners)
+			break
+		}
+		counter++
+
+
+		
+
+
+		// 
 	}
 }
