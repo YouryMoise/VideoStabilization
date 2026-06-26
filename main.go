@@ -356,6 +356,10 @@ func lucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points []
 
 		newX := x + xChange
 		newY := y + yChange
+
+		if newX < 0 || newX > float64(newFrm.GetWidth()-1) || newY < 0 || newY > float64(newFrm.GetHeight()-1) {
+			continue
+		}
 		outputPoints = append(outputPoints, [2]float64{newX, newY})
 	}
 
@@ -364,22 +368,33 @@ func lucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points []
 	
 }
 
-func displayST(frm *Frame, coords [][2]float64, windowWidth, windowHeight int) {
+func displayST(frm *Frame, coords [][2]float64, windowWidth, windowHeight, counter int) {
 	withCorners := makeFrame(frm.GetWidth(), frm.GetHeight(), frm.GetChannels())
 	withCorners.FillFrame(frm.pixels)
 	for _, coord := range coords {
-		midX := int(coord[0])
-		midY := int(coord[1])
+		midX := int(math.Round(coord[0]))
+		midY := int(math.Round(coord[1]))
 		for wx := -windowWidth/2; wx <= windowWidth/2; wx++ {
+			if midX + wx < 0 || midX + wx >= frm.GetWidth() {
+				continue
+			}
 			for wy := -windowHeight/2; wy <= windowHeight/2; wy++ {
+				if midY + wy < 0 || midY + wy >= frm.GetHeight() {
+					continue
+				}
+				fmt.Printf("midX+wx %v midY+wx %v\n", midX+wx, midY+wy)
 				withCorners.SetPixelAt(midX+wx, midY+wy, []float64{1,1,1,1})
 			}
 		}
 	}
 
+	filename := fmt.Sprintf("./outputFrames/f%03d.png", counter)
+
+
 	grayFrame := withCorners.Grayscale()
 	grayImg := getGrayscaleImg(grayFrame)
-	saveToPNG(grayImg, "./display.png")
+	// saveToPNG(grayImg, "./display.png")
+	saveToPNG(grayImg, filename)
 
 }
 
@@ -419,14 +434,17 @@ func main() {
 			corners := shiTomasi(frame, 5, 5)
 			allCorners = append(allCorners, corners)
 			// displayST(frame, corners, 5,5)
-			oldFrm = frame
+			displayST(frame, corners, 5, 5, counter)
 
 		} else {
-			fmt.Printf("calling lk with corners %v\n", allCorners)
+			fmt.Printf("calling lk with corners %v\n", allCorners[len(allCorners)-1])
 			corners := lucasKanade(oldFrm, frame, 5, 5, allCorners[len(allCorners)-1])
+			allCorners = append(allCorners, corners)
 			fmt.Printf("new corners %v\n", corners)
-			break
+			displayST(frame, corners, 5, 5, counter)
+
 		}
+		oldFrm = frame
 		counter++
 
 
