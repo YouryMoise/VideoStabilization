@@ -436,6 +436,28 @@ func lucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points []
 	
 }
 
+func shiftImage(oldFrm *Frame, xChange, yChange float64) *Frame {
+	outputFrm := makeFrame(oldFrm.GetWidth(), oldFrm.GetHeight(), oldFrm.GetChannels())
+	for x := 0; x < outputFrm.GetWidth(); x++ {
+		oldX := float64(x) - xChange
+		if oldX < 0 || oldX >= float64(outputFrm.GetWidth()-1) {
+			continue
+		}
+
+		for y := 0; y < outputFrm.GetHeight(); y++ {
+			oldY := float64(y) - yChange
+			if oldY < 0 || oldY >= float64(outputFrm.GetHeight()-1) {
+				continue
+			}
+			// fmt.Printf("x %v y %v\n", oldX, oldY)
+			outputFrm.SetPixelAt(x,y, oldFrm.InterpolatePixelAt(oldX, oldY))
+		}
+	} 
+	return outputFrm
+
+
+}
+
 func displayST(frm *Frame, coords [][2]float64, windowWidth, windowHeight, counter int, outputFolder string) {
 	withCorners := makeFrame(frm.GetWidth(), frm.GetHeight(), frm.GetChannels())
 	withCorners.FillFrame(frm.pixels)
@@ -486,6 +508,9 @@ func main() {
 	counter := 0
 	var oldFrm *Frame
 	allCorners := make([][][2]float64,0)
+	txAverageSum := 0.0
+	tyAverageSum := 0.0
+	
 	for video.Read() {
 		// FrameBuffer returns a byte array of the frame in row-major order (RGBA format)
 		rawFrame := video.FrameBuffer()
@@ -510,8 +535,22 @@ func main() {
 			// fmt.Printf("calling lk with corners %v\n", allCorners[len(allCorners)-1])
 			corners := lucasKanade(oldFrm, frame, 5, 5, allCorners[len(allCorners)-1])
 			allCorners = append(allCorners, corners)
+
+			txSum := 0.0
+			tySum := 0.0
+			for index := range corners {
+				txSum += (corners[index][0]-allCorners[0][index][0])
+				tySum += (corners[index][1]-allCorners[0][index][1])
+			}
+			txAverage := txSum/float64(len(corners))
+			tyAverage := tySum/float64(len(corners))
+			
+			txAverageSum += txAverage
+			tyAverageSum += tyAverage
+
+			shiftedFrame := shiftImage(frame, txAverageSum, tyAverageSum)
 			// fmt.Printf("new corners %v\n", corners)
-			displayST(frame, corners, 5, 5, counter, "chargerOutputFrames")
+			displayST(shiftedFrame, corners, 5, 5, counter, "chargerOutputFrames")
 			// break
 
 		}
