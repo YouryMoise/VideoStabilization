@@ -188,6 +188,57 @@ func (frm *Frame) Gradient(vertical bool) *Frame {
 	return gradFrm
 }
 
+func (frm *Frame) Convolve(kernel [][]float64) *Frame {
+	// changes size
+	kernelWidth := len(kernel[0])
+	kernelHeight := len(kernel)
+	outputWidth := frm.GetWidth() - (kernelWidth-1)
+	outputHeight := frm.GetHeight() - (kernelHeight-1)
+	outputChannels := frm.GetChannels()
+	outputFrm := makeFrame(outputWidth, outputHeight, outputChannels)
+	for x := 0; x < outputWidth; x++ {
+		for y := 0; y < outputHeight; y++ {
+			originalX := x + kernelWidth/2
+			originalY := y + kernelHeight/2
+			outputValue := []float64{0.0, 0.0, 0.0, 0.0}
+			for wx := -kernelWidth/2; wx <= kernelWidth/2; wx++ {
+				for wy := -kernelHeight/2; wy <= kernelHeight/2; wy++ {
+					originalPixel := frm.GetPixelAt(originalX+wx, originalY+wy)
+					for c := 0; c < int(math.Min(float64(outputChannels), 3)); c++ {
+						outputValue[c] += float64(originalPixel[c])*kernel[wy+kernelHeight/2][wx+kernelWidth/2]
+					}
+					
+				}
+			}
+			outputFrm.SetPixelAt(x,y,outputValue)
+		}
+	}
+	return outputFrm
+}
+
+func (frm *Frame) Blur() *Frame {
+	// hardcoded 5x5
+	kernel := [][]float64{
+		[]float64{0.0038, 0.015, 0.0238, 0.015, 0.0038},
+		[]float64{0.015, 0.0599, 0.0949, 0.0599, 0.015},
+		[]float64{0.0238, 0.0949, 0.01503, 0.0949, 0.0238},
+		[]float64{0.015, 0.0599, 0.0949, 0.0599, 0.0150},
+		[]float64{0.0038, 0.015, 0.0238, 0.015, 0.0038},
+	}
+
+	return frm.Convolve(kernel)
+}
+
+func (frm *Frame) Sharpen() *Frame {
+	kernel := [][]float64{
+		[]float64{-0.0039, -0.0156, -0.0234, -0.0156, -0.0039},
+		[]float64{-0.0156, -0.0625, -0.0938, -0.0625, -0.0156},
+		[]float64{-0.0234, -0.0938, 1.8598, -0.0938, -0.0234},
+		[]float64{-0.0156, -0.0625, -0.0938, -0.0625, -0.0156},
+		[]float64{-0.0039, -0.0156, -0.0234, -0.0156, -0.0039},
+	}
+	return frm.Convolve(kernel)
+}
 
 func shiTomasi(frm *Frame, windowWidth, windowHeight int) [][2]float64 {
 	// convert to grayscale
@@ -492,8 +543,8 @@ func displayST(frm *Frame, coords [][2]float64, windowWidth, windowHeight, count
 func main() {
 	// Open the video file
 	// video, err := vidio.NewVideo("media/paper2.mp4")
-	video, err := vidio.NewVideo("media/Charger2.mp4")
-	// video, err := vidio.NewVideo("media/kitchen.mp4")
+	// video, err := vidio.NewVideo("media/Charger2.mp4")
+	video, err := vidio.NewVideo("media/kitchen.mp4")
 	if err != nil {
 		log.Fatalf("Failed to open video: %v", err)
 	}
@@ -520,6 +571,13 @@ func main() {
 		}
 		frame := makeFrame(frame_width, frame_height, frame_channels)
 		frame.FillFrame(rawFrameFloats)
+
+		blurredFrame := frame.Blur()
+		sharpenedFrame := blurredFrame.Sharpen()
+		displayST(blurredFrame, [][2]float64{}, 5, 5, 0, "temp")
+		displayST(frame, [][2]float64{}, 5, 5, 1, "temp")
+		displayST(sharpenedFrame, [][2]float64{}, 5, 5, 2, "temp")
+		break
 
 		// if frame 0, get corners using shiTomasi; save f0 as "oldFrame" and continue
 		// otherwise, use shiTomasi to get corners, do thisFrame-oldFrame for I_t
