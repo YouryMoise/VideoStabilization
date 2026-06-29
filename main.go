@@ -294,81 +294,149 @@ func lucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points []
 	right matrix is -(sIxIt, sIyIt)
 	solve for u,v; u gives x change, v gives y change
 	use these to update the point information */
+
 	grayOld := oldFrm.Grayscale()
 	grayFrm := newFrm.Grayscale()
 
-	Ix := grayFrm.Gradient(false)
-	Iy := grayFrm.Gradient(true)
+	frameWidth := grayFrm.GetWidth()
+	frameHeight := grayFrm.GetHeight()
+	// frameChannels := grayFrm.GetChannels()
+
+
+	Ix := grayOld.Gradient(false)
+	Iy := grayOld.Gradient(true)
 	
-	IxIt := makeFrame(grayFrm.GetWidth(), grayFrm.GetHeight(), grayFrm.GetChannels())
-	IyIt := makeFrame(grayFrm.GetWidth(), grayFrm.GetHeight(), grayFrm.GetChannels())
-	Ix2 := makeFrame(grayFrm.GetWidth(), grayFrm.GetHeight(), grayFrm.GetChannels())
-	Iy2 := makeFrame(grayFrm.GetWidth(), grayFrm.GetHeight(), grayFrm.GetChannels())
-	IxIy := makeFrame(grayFrm.GetWidth(), grayFrm.GetHeight(), grayFrm.GetChannels())
-	for x := range grayFrm.GetWidth() {
-		for y := range grayFrm.GetHeight() {
-			oldValue := grayOld.GetPixelAt(x,y)[0]
-			newValue := grayFrm.GetPixelAt(x,y)[0]
-			IxValue := Ix.GetPixelAt(x,y)[0]
-			IyValue := Iy.GetPixelAt(x,y)[0]
-			Ix2.SetPixelAt(x,y,[]float64{IxValue*IxValue})
-			Iy2.SetPixelAt(x,y,[]float64{IyValue*IyValue})
-			IxIy.SetPixelAt(x,y,[]float64{IxValue*IyValue})
-			IxIt.SetPixelAt(x,y, []float64{(newValue-oldValue)*IxValue})
-			IyIt.SetPixelAt(x,y, []float64{(newValue-oldValue)*IyValue})
-		}
-	}
+	// IxIt := makeFrame(frameWidth, frameHeight, frameChannels)
+	// IyIt := makeFrame(frameWidth, frameHeight, frameChannels)
+	// Ix := makeFrame(frameWidth, frameHeight, frameChannels)
+	// Iy := makeFrame(frameWidth, frameHeight, frameChannels)
+	// IxIy := makeFrame(frameWidth, frameHeight, frameChannels)
+	// for x := range grayFrm.GetWidth() {
+	// 	for y := range grayFrm.GetHeight() {
+	// 		// oldValue := grayOld.GetPixelAt(x,y)[0]
+	// 		// newValue := grayFrm.GetPixelAt(x,y)[0]
+	// 		IxValue := Ix.GetPixelAt(x,y)[0]
+	// 		IyValue := Iy.GetPixelAt(x,y)[0]
+	// 		Ix.SetPixelAt(x,y,[]float64{IxValue})
+	// 		Iy.SetPixelAt(x,y,[]float64{IyValue})
+	// 		IxIy.SetPixelAt(x,y,[]float64{IxValue*IyValue})
+	// 		// IxIt.SetPixelAt(x,y, []float64{(newValue-oldValue)*IxValue})
+	// 		// IyIt.SetPixelAt(x,y, []float64{(newValue-oldValue)*IyValue})
+	// 	}
+	// }
 
-	outputPoints := make([][2]float64, 0)
+	
+	newPoints := make([][2]float64, len(points))
+	copy(newPoints, points)
 
-	for _, point := range points {
-		x := point[0]
-		y := point[1]
-		sumIx2 := 0.0
-		sumIy2 := 0.0
-		sumIxIy := 0.0
-		sumIxIt := 0.0
-		sumIyIt := 0.0
+	for i := 0; i < 10; i++{
+		// newPoints := make([][2]float64, 0)
+		for index, point := range points {
+			x := point[0]
+			y := point[1]
+			newX := newPoints[index][0]
+			newY := newPoints[index][1]
 
-		for wx := -windowWidth/2; wx <= windowWidth/2; wx++ {
-			for wy := -windowHeight/2; wy <= windowHeight/2; wy++ {
-				sumIx2 += Ix.InterpolatePixelAt(x,y)[0]
-				sumIy2 += Iy.InterpolatePixelAt(x,y)[0]
-				sumIxIy += IxIy.InterpolatePixelAt(x,y)[0]
-				sumIxIt += IxIt.InterpolatePixelAt(x,y)[0]
-				sumIyIt += IyIt.InterpolatePixelAt(x,y)[0]
+			sumIx2 := 0.0
+			sumIy2 := 0.0
+			sumIxIy := 0.0
+			sumIxIt := 0.0
+			sumIyIt := 0.0
+
+			for wx := float64(-windowWidth/2); wx <= float64(windowWidth/2); wx++ {
+				if x+wx < 0 || x+wx >= float64(frameWidth-1) ||
+					 newX+wx < 0 || newX+wx >= float64(frameWidth-1){
+					continue
+				}
+				for wy := float64(-windowHeight/2); wy <= float64(windowHeight/2); wy++ {
+					if y+wy < 0 || y+wy >= float64(frameHeight-1) ||
+					newY+wy < 0 || newY+wy >= float64(frameHeight-1) {
+						continue
+					}
+					// fmt.Printf("x %v wx %v y %v wy %v\n", x, wx, y,wy)
+					IxValue := Ix.InterpolatePixelAt(x+wx,y+wy)[0]
+					IyValue := Iy.InterpolatePixelAt(x+wx,y+wy)[0]
+					
+					sumIx2 += IxValue*IxValue
+					sumIy2 += IyValue*IyValue
+					sumIxIy += IxValue*IyValue
+
+					// not sure whether to use newX or X here
+					oldValue := grayOld.InterpolatePixelAt(x+wx,y+wy)[0]
+					newValue := grayFrm.InterpolatePixelAt(newX+wx,newY+wy)[0]
+
+					sumIxIt += (newValue-oldValue)*IxValue
+					sumIyIt += (newValue-oldValue)*IyValue
+				}
 			}
+
+			A := mat.NewDense(2,2, []float64{sumIx2, sumIxIy, sumIxIy, sumIy2})
+			
+			var eig mat.Eigen
+			if ok := eig.Factorize(A, mat.EigenRight); !ok {
+				log.Fatal("Eigendecomposition failed to converge")
+			}
+			// eigenvalues := eig.Values(nil)
+			
+			// // these are both real and positive
+			// e0 := cmplx.Abs(eigenvalues[0])
+			// e1 := cmplx.Abs(eigenvalues[1])
+			// var eMax float64
+			// var eMin float64
+			// if e0 > e1 {
+			// 	eMax = e0
+			// 	eMin = e1
+			// } else {
+			// 	eMax = e1
+			// 	eMin = e0
+			// }
+			// conditionNumber := eMax/eMin
+			// if conditionNumber >= 25 {
+			// 	fmt.Printf("Continuing due to condition number: %v\n", conditionNumber)
+			// 	continue
+			// }
+			
+
+			b := mat.NewVecDense(2, []float64{-sumIxIt, -sumIyIt})
+			// fmt.Printf("A %v b %v\n", A, b)
+			var uv mat.VecDense
+			err := uv.SolveVec(A, b)
+			if err != nil {
+				fmt.Printf("Error solving system: %v\n", err)
+				continue
+			}
+			xChange := uv.RawVector().Data[0]
+			yChange := uv.RawVector().Data[1]
+
+			updatedX := newPoints[index][0] + xChange
+			updatedY := newPoints[index][1] + yChange
+
+			// fmt.Printf("uvRaw %v xChange %v yChange %v\n",uv.RawVector(), xChange, yChange)
+
+			// newX := x + xChange
+			// newY := y + yChange
+
+			if updatedX < 0 || updatedX > float64(newFrm.GetWidth()-1) || updatedY < 0 || updatedY > float64(newFrm.GetHeight()-1) {
+				continue
+			}
+			newPoints[index][0] = updatedX
+			newPoints[index][1] = updatedY
+
+			// outputPoints[index][0] = newX
+			// outputPoints[index][1] = newY
+			// newPoints = append(newPoints, [2]float64{newX, newY})
 		}
+		// currentPoints = newPoints
 
-		A := mat.NewDense(2,2, []float64{sumIx2, sumIxIy, sumIxIy, sumIy2})
-		b := mat.NewVecDense(2, []float64{sumIxIt, sumIyIt})
-		// fmt.Printf("A %v b %v\n", A, b)
-		var uv mat.VecDense
-		err := uv.SolveVec(A, b)
-		if err != nil {
-			// fmt.Printf("Error solving system: %v\n", err)
-			continue
-		}
-		xChange := uv.RawVector().Data[0]
-		yChange := uv.RawVector().Data[1]
-
-		// fmt.Printf("uvRaw %v xChange %v yChange %v\n",uv.RawVector(), xChange, yChange)
-
-		newX := x + xChange
-		newY := y + yChange
-
-		if newX < 0 || newX > float64(newFrm.GetWidth()-1) || newY < 0 || newY > float64(newFrm.GetHeight()-1) {
-			continue
-		}
-		outputPoints = append(outputPoints, [2]float64{newX, newY})
 	}
+	
 
-	return outputPoints
+	return newPoints
 	
 	
 }
 
-func displayST(frm *Frame, coords [][2]float64, windowWidth, windowHeight, counter int) {
+func displayST(frm *Frame, coords [][2]float64, windowWidth, windowHeight, counter int, outputFolder string) {
 	withCorners := makeFrame(frm.GetWidth(), frm.GetHeight(), frm.GetChannels())
 	withCorners.FillFrame(frm.pixels)
 	for _, coord := range coords {
@@ -382,13 +450,13 @@ func displayST(frm *Frame, coords [][2]float64, windowWidth, windowHeight, count
 				if midY + wy < 0 || midY + wy >= frm.GetHeight() {
 					continue
 				}
-				fmt.Printf("midX+wx %v midY+wx %v\n", midX+wx, midY+wy)
+				// fmt.Printf("midX+wx %v midY+wx %v\n", midX+wx, midY+wy)
 				withCorners.SetPixelAt(midX+wx, midY+wy, []float64{1,1,1,1})
 			}
 		}
 	}
 
-	filename := fmt.Sprintf("./outputFrames/f%03d.png", counter)
+	filename := fmt.Sprintf("./%s/f%03d.png",outputFolder, counter)
 
 
 	grayFrame := withCorners.Grayscale()
@@ -402,7 +470,8 @@ func displayST(frm *Frame, coords [][2]float64, windowWidth, windowHeight, count
 func main() {
 	// Open the video file
 	// video, err := vidio.NewVideo("media/paper2.mp4")
-	video, err := vidio.NewVideo("media/kitchen.mp4")
+	video, err := vidio.NewVideo("media/Charger2.mp4")
+	// video, err := vidio.NewVideo("media/kitchen.mp4")
 	if err != nil {
 		log.Fatalf("Failed to open video: %v", err)
 	}
@@ -430,18 +499,20 @@ func main() {
 		// if frame 0, get corners using shiTomasi; save f0 as "oldFrame" and continue
 		// otherwise, use shiTomasi to get corners, do thisFrame-oldFrame for I_t
 		// still using the Ix and Iy of the previous frame though
+		fmt.Printf("Counter %v\n", counter)
 		if counter == 0 {
 			corners := shiTomasi(frame, 5, 5)
 			allCorners = append(allCorners, corners)
 			// displayST(frame, corners, 5,5)
-			displayST(frame, corners, 5, 5, counter)
+			displayST(frame, corners, 5, 5, counter, "chargerOutputFrames")
 
 		} else {
-			fmt.Printf("calling lk with corners %v\n", allCorners[len(allCorners)-1])
+			// fmt.Printf("calling lk with corners %v\n", allCorners[len(allCorners)-1])
 			corners := lucasKanade(oldFrm, frame, 5, 5, allCorners[len(allCorners)-1])
 			allCorners = append(allCorners, corners)
-			fmt.Printf("new corners %v\n", corners)
-			displayST(frame, corners, 5, 5, counter)
+			// fmt.Printf("new corners %v\n", corners)
+			displayST(frame, corners, 5, 5, counter, "chargerOutputFrames")
+			// break
 
 		}
 		oldFrm = frame
