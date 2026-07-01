@@ -192,18 +192,31 @@ func (frm *Frame) Convolve(kernel [][]float64) *Frame {
 	// changes size
 	kernelWidth := len(kernel[0])
 	kernelHeight := len(kernel)
-	outputWidth := frm.GetWidth() - (kernelWidth-1)
-	outputHeight := frm.GetHeight() - (kernelHeight-1)
+	outputWidth := frm.GetWidth()
+	outputHeight := frm.GetHeight()
 	outputChannels := frm.GetChannels()
 	outputFrm := makeFrame(outputWidth, outputHeight, outputChannels)
 	for x := 0; x < outputWidth; x++ {
 		for y := 0; y < outputHeight; y++ {
-			originalX := x + kernelWidth/2
-			originalY := y + kernelHeight/2
 			outputValue := []float64{0.0, 0.0, 0.0, 0.0}
 			for wx := -kernelWidth/2; wx <= kernelWidth/2; wx++ {
+				targetX := x + wx
+				if targetX < 0 {
+					targetX += outputWidth
+				}
+				if targetX >= outputWidth {
+					targetX -= outputWidth
+				}
 				for wy := -kernelHeight/2; wy <= kernelHeight/2; wy++ {
-					originalPixel := frm.GetPixelAt(originalX+wx, originalY+wy)
+					targetY := y + wy
+					if targetY < 0 {
+						targetY += outputHeight
+					}
+					if targetY >= outputHeight {
+						targetY -= outputHeight
+					}
+					// fmt.Printf("x %v y %v\n", targetX, targetY)
+					originalPixel := frm.GetPixelAt(targetX, targetY)
 					for c := 0; c < int(math.Min(float64(outputChannels), 3)); c++ {
 						outputValue[c] += float64(originalPixel[c])*kernel[wy+kernelHeight/2][wx+kernelWidth/2]
 					}
@@ -221,7 +234,7 @@ func (frm *Frame) Blur() *Frame {
 	kernel := [][]float64{
 		[]float64{0.0038, 0.015, 0.0238, 0.015, 0.0038},
 		[]float64{0.015, 0.0599, 0.0949, 0.0599, 0.015},
-		[]float64{0.0238, 0.0949, 0.01503, 0.0949, 0.0238},
+		[]float64{0.0238, 0.0949, 0.1503, 0.0949, 0.0238},
 		[]float64{0.015, 0.0599, 0.0949, 0.0599, 0.0150},
 		[]float64{0.0038, 0.015, 0.0238, 0.015, 0.0038},
 	}
@@ -238,6 +251,29 @@ func (frm *Frame) Sharpen() *Frame {
 		[]float64{-0.0039, -0.0156, -0.0234, -0.0156, -0.0039},
 	}
 	return frm.Convolve(kernel)
+}
+
+func (frm *Frame) Downsample(factor int) *Frame {
+	blurredFrm := frm.Blur()
+	inputWidth := blurredFrm.GetWidth()
+	inputHeight := blurredFrm.GetHeight()
+	inputChannels := blurredFrm.GetChannels()
+	outputWidth := inputWidth/factor
+	outputHeight := inputHeight/factor
+	outputFrm := makeFrame(outputWidth, outputHeight, inputChannels)
+	
+	
+	for x := 0; x < outputWidth; x++ {
+		inputX := x*factor
+		for y := 0; y < outputHeight; y++ {
+			inputY := y*factor
+			original := blurredFrm.GetPixelAt(inputX, inputY)
+			copied := make([]float64, inputChannels)
+			copy(copied, original)
+			outputFrm.SetPixelAt(x,y, copied)
+		}
+	}
+	return outputFrm
 }
 
 func shiTomasi(frm *Frame, windowWidth, windowHeight int) [][2]float64 {
@@ -335,7 +371,7 @@ func shiTomasi(frm *Frame, windowWidth, windowHeight int) [][2]float64 {
 
 }
 
-func lucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points [][2]float64) [][2]float64 {
+func lucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points [][2]float64) ([][2]float64, []bool) {
 	// will need to redo this and shiTomasi to have less repeated code
 	/* for each window
 	get the sum(Ix2), Sum(Iy2), sum(IxIy) from the old frame
@@ -380,9 +416,14 @@ func lucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points []
 	newPoints := make([][2]float64, len(points))
 	copy(newPoints, points)
 
-	for i := 0; i < 10; i++{
+	invalid := make([]bool, len(points)) // all start off as false
+
+	for i := 0; i < 5; i++{
 		// newPoints := make([][2]float64, 0)
 		for index, point := range points {
+			if invalid[index] {
+				continue
+			}
 			x := point[0]
 			y := point[1]
 			newX := newPoints[index][0]
@@ -425,7 +466,9 @@ func lucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points []
 			
 			var eig mat.Eigen
 			if ok := eig.Factorize(A, mat.EigenRight); !ok {
+				invalid[index] = true
 				log.Fatal("Eigendecomposition failed to converge")
+				continue
 			}
 			// eigenvalues := eig.Values(nil)
 			
@@ -454,6 +497,7 @@ func lucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points []
 			err := uv.SolveVec(A, b)
 			if err != nil {
 				fmt.Printf("Error solving system: %v\n", err)
+				invalid[index] = true
 				continue
 			}
 			xChange := uv.RawVector().Data[0]
@@ -468,6 +512,7 @@ func lucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points []
 			// newY := y + yChange
 
 			if updatedX < 0 || updatedX > float64(newFrm.GetWidth()-1) || updatedY < 0 || updatedY > float64(newFrm.GetHeight()-1) {
+				// invalid[index] = true don't know for sure
 				continue
 			}
 			newPoints[index][0] = updatedX
@@ -482,7 +527,7 @@ func lucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points []
 	}
 	
 
-	return newPoints
+	return newPoints, invalid
 	
 	
 }
@@ -543,8 +588,8 @@ func displayST(frm *Frame, coords [][2]float64, windowWidth, windowHeight, count
 func main() {
 	// Open the video file
 	// video, err := vidio.NewVideo("media/paper2.mp4")
-	// video, err := vidio.NewVideo("media/Charger2.mp4")
-	video, err := vidio.NewVideo("media/kitchen.mp4")
+	video, err := vidio.NewVideo("media/Charger2.mp4")
+	// video, err := vidio.NewVideo("media/kitchen.mp4")
 	if err != nil {
 		log.Fatalf("Failed to open video: %v", err)
 	}
@@ -559,8 +604,8 @@ func main() {
 	counter := 0
 	var oldFrm *Frame
 	allCorners := make([][][2]float64,0)
-	txAverageSum := 0.0
-	tyAverageSum := 0.0
+	// txAverageSum := 0.0
+	// tyAverageSum := 0.0
 	
 	for video.Read() {
 		// FrameBuffer returns a byte array of the frame in row-major order (RGBA format)
@@ -572,12 +617,14 @@ func main() {
 		frame := makeFrame(frame_width, frame_height, frame_channels)
 		frame.FillFrame(rawFrameFloats)
 
-		blurredFrame := frame.Blur()
-		sharpenedFrame := blurredFrame.Sharpen()
-		displayST(blurredFrame, [][2]float64{}, 5, 5, 0, "temp")
-		displayST(frame, [][2]float64{}, 5, 5, 1, "temp")
-		displayST(sharpenedFrame, [][2]float64{}, 5, 5, 2, "temp")
-		break
+		// down := frame.Downsample(2)
+		// blurredFrame := frame.Blur()
+		// sharpenedFrame := blurredFrame.Sharpen()
+		// displayST(blurredFrame, [][2]float64{}, 5, 5, 0, "temp")
+		// displayST(frame, [][2]float64{}, 5, 5, 1, "temp")
+		// displayST(sharpenedFrame, [][2]float64{}, 5, 5, 2, "temp")
+		// displayST(down, [][2]float64{}, 5, 5, 2, "temp")
+		// break
 
 		// if frame 0, get corners using shiTomasi; save f0 as "oldFrame" and continue
 		// otherwise, use shiTomasi to get corners, do thisFrame-oldFrame for I_t
@@ -591,24 +638,47 @@ func main() {
 
 		} else {
 			// fmt.Printf("calling lk with corners %v\n", allCorners[len(allCorners)-1])
-			corners := lucasKanade(oldFrm, frame, 5, 5, allCorners[len(allCorners)-1])
-			allCorners = append(allCorners, corners)
-
-			txSum := 0.0
-			tySum := 0.0
-			for index := range corners {
-				txSum += (corners[index][0]-allCorners[0][index][0])
-				tySum += (corners[index][1]-allCorners[0][index][1])
+			recentPoints := allCorners[len(allCorners)-1]
+			factors := []float64{2,4,8}
+			for index := len(factors)-1; index >= 0; index-- {
+				factor := factors[index]
+				scaledDownPoints := make([][2]float64, len(recentPoints))
+				for i, point := range recentPoints {
+					scaledDownPoints[i] = [2]float64{point[0]/factor, point[1]/factor}
+				}
+				scaledOldFrm := oldFrm.Downsample(int(factor))
+				scaledNewFrm := frame.Downsample(int(factor))
+				newCorners, invalid := lucasKanade(scaledOldFrm, scaledNewFrm, 5, 5, scaledDownPoints)
+				filteredNewCorners := make([][2]float64, 0)
+				for j, point := range newCorners {
+					if invalid[j] {
+						continue
+					}
+					scaledUpPoint := [2]float64{point[0]*factor, point[1]*factor}
+					filteredNewCorners = append(filteredNewCorners, scaledUpPoint)
+				}
+				recentPoints = filteredNewCorners
 			}
-			txAverage := txSum/float64(len(corners))
-			tyAverage := tySum/float64(len(corners))
 			
-			txAverageSum += txAverage
-			tyAverageSum += tyAverage
+			// corners, _ := lucasKanade(oldFrm, frame, 5, 5, allCorners[len(allCorners)-1])
+			allCorners = append(allCorners, recentPoints)
 
-			shiftedFrame := shiftImage(frame, txAverageSum, tyAverageSum)
+			// txSum := 0.0
+			// tySum := 0.0
+			// for index := range corners {
+			// 	txSum += (corners[index][0]-allCorners[0][index][0])
+			// 	tySum += (corners[index][1]-allCorners[0][index][1])
+			// }
+			// txAverage := txSum/float64(len(corners))
+			// tyAverage := tySum/float64(len(corners))
+			
+			// txAverageSum += txAverage
+			// tyAverageSum += tyAverage
+
+			// shiftedFrame := shiftImage(frame, txAverageSum, tyAverageSum)
 			// fmt.Printf("new corners %v\n", corners)
-			displayST(shiftedFrame, corners, 5, 5, counter, "chargerOutputFrames")
+			displayST(frame, recentPoints, 5, 5, counter, "chargerOutputFrames")
+			// displayST(shiftedFrame, corners, 5, 5, counter, "chargerOutputFrames")
 			// break
 
 		}
