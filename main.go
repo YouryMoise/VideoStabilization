@@ -391,12 +391,12 @@ func shiTomasi(frm *Frame, windowWidth, windowHeight int) [][2]float64 {
 	// }
 
 	thresholdR := float64(maxR * 0.1)
-	fmt.Printf("max %v threshold %v\n",maxR, thresholdR)
+	// fmt.Printf("max %v threshold %v\n",maxR, thresholdR)
 	
 	intermediateCoords := make([][3]float64, 0)
 
 	for x := 0; x < frameWidth; x++{
-		fmt.Printf("x %v\n", x)
+		// fmt.Printf("x %v\n", x)
 		for y := 0; y < frameHeight; y++{
 			rValue := rFrame.GetPixelAt(x,y)[0]
 			valid := true
@@ -453,7 +453,7 @@ func shiTomasi(frm *Frame, windowWidth, windowHeight int) [][2]float64 {
 		outputCoords[i] = [2]float64{c[0], c[1]}
 	}
 	// var outputCoords [][2]float64 = [][2]float64(intermediateCoords[:100][:2]) 
-	fmt.Printf("output %v\n", outputCoords)
+	// fmt.Printf("output %v\n", outputCoords)
 
 	return outputCoords
 
@@ -506,11 +506,11 @@ func lucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points []
 
 	invalid := make([]bool, len(points)) // all start off as false
 
-	for i := 0; i < 5; i++{
+	for index, point := range points {
+		for i := 0; i < 20; i++{
 		// newPoints := make([][2]float64, 0)
-		for index, point := range points {
 			if invalid[index] {
-				continue
+				break
 			}
 			x := point[0]
 			y := point[1]
@@ -559,7 +559,7 @@ func lucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points []
 				continue
 			}
 
-			fmt.Printf("x %v y %v: sumIx2 %v sumIy2 %v sumIxy %v sumIxt %v sumIyt %v\n", x, y, sumIx2, sumIy2, sumIxIy, sumIxIt, sumIyIt)
+			// fmt.Printf("x %v y %v: sumIx2 %v sumIy2 %v sumIxy %v sumIxt %v sumIyt %v\n", x, y, sumIx2, sumIy2, sumIxIy, sumIxIt, sumIyIt)
 			// eigenvalues := eig.Values(nil)
 			
 			// // these are both real and positive
@@ -592,7 +592,7 @@ func lucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points []
 			}
 			xChange := uv.RawVector().Data[0]
 			yChange := uv.RawVector().Data[1]
-			fmt.Printf("xChange %v yChange %v\n", xChange, yChange)
+			fmt.Printf("i %v index %v xChange %v yChange %v\n",i, index, xChange, yChange)
 
 			updatedX := newPoints[index][0] + xChange
 			updatedY := newPoints[index][1] + yChange
@@ -608,6 +608,10 @@ func lucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points []
 			}
 			newPoints[index][0] = updatedX
 			newPoints[index][1] = updatedY
+			if math.Abs(xChange) < 0.05 && math.Abs(yChange) < 0.05 {
+				fmt.Printf("Breaking early i %v x %v y %v\n",i, xChange, yChange)
+				break
+			}
 
 			// outputPoints[index][0] = newX
 			// outputPoints[index][1] = newY
@@ -617,12 +621,36 @@ func lucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points []
 
 	}
 
-	fmt.Printf("old points %v\nnew points %v\ninvalid %v", points, newPoints, invalid)
+	// fmt.Printf("old points %v\nnew points %v\ninvalid %v", points, newPoints, invalid)
 	
 
 	return newPoints, invalid
 	
 	
+}
+
+func pyramidalLucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points [][2]float64) [][2]float64 {
+	factors := []float64{2,4,8}
+	for index := len(factors)-1; index >= 0; index-- {
+		factor := factors[index]
+		scaledDownPoints := make([][2]float64, len(points))
+		for i, point := range points {
+			scaledDownPoints[i] = [2]float64{point[0]/factor, point[1]/factor}
+		}
+		scaledOldFrm := oldFrm.Downsample(int(factor))
+		scaledNewFrm := newFrm.Downsample(int(factor))
+		newCorners, _ := lucasKanade(scaledOldFrm, scaledNewFrm, 10, 10, scaledDownPoints)
+		filteredNewCorners := make([][2]float64, 0)
+		for _, point := range newCorners {
+			// if invalid[j] {
+			// 	continue
+			// }
+			scaledUpPoint := [2]float64{point[0]*factor, point[1]*factor}
+			filteredNewCorners = append(filteredNewCorners, scaledUpPoint)
+		}
+		points = filteredNewCorners
+	}
+	return points
 }
 
 func shiftImage(oldFrm *Frame, xChange, yChange float64) *Frame {
@@ -727,7 +755,8 @@ func main() {
 			allTestCorners = append(allTestCorners, testCorners)
 			displayST(frm, testCorners, 5, 5, testCounter, "draw")
 		} else {
-			testCorners, _ := lucasKanade(oldFrm, frm, 15,15, allTestCorners[len(allTestCorners)-1])
+			// testCorners, _ := lucasKanade(oldFrm, frm, 10,10, allTestCorners[len(allTestCorners)-1])
+			testCorners := pyramidalLucasKanade(oldFrm, frm, 15,15, allTestCorners[len(allTestCorners)-1])
 			allTestCorners = append(allTestCorners, testCorners)
 			displayST(frm, testCorners, 5, 5, testCounter, "draw")
 		}
@@ -773,26 +802,27 @@ func main() {
 		} else {
 			// fmt.Printf("calling lk with corners %v\n", allCorners[len(allCorners)-1])
 			recentPoints := allCorners[len(allCorners)-1]
-			factors := []float64{2,4,8}
-			for index := len(factors)-1; index >= 0; index-- {
-				factor := factors[index]
-				scaledDownPoints := make([][2]float64, len(recentPoints))
-				for i, point := range recentPoints {
-					scaledDownPoints[i] = [2]float64{point[0]/factor, point[1]/factor}
-				}
-				scaledOldFrm := oldFrm.Downsample(int(factor))
-				scaledNewFrm := frame.Downsample(int(factor))
-				newCorners, invalid := lucasKanade(scaledOldFrm, scaledNewFrm, 5, 5, scaledDownPoints)
-				filteredNewCorners := make([][2]float64, 0)
-				for j, point := range newCorners {
-					if invalid[j] {
-						continue
-					}
-					scaledUpPoint := [2]float64{point[0]*factor, point[1]*factor}
-					filteredNewCorners = append(filteredNewCorners, scaledUpPoint)
-				}
-				recentPoints = filteredNewCorners
-			}
+			recentPoints = pyramidalLucasKanade(oldFrm, frame, 5, 5, recentPoints)
+			// factors := []float64{2,4,8}
+			// for index := len(factors)-1; index >= 0; index-- {
+			// 	factor := factors[index]
+			// 	scaledDownPoints := make([][2]float64, len(recentPoints))
+			// 	for i, point := range recentPoints {
+			// 		scaledDownPoints[i] = [2]float64{point[0]/factor, point[1]/factor}
+			// 	}
+			// 	scaledOldFrm := oldFrm.Downsample(int(factor))
+			// 	scaledNewFrm := frame.Downsample(int(factor))
+			// 	newCorners, invalid := lucasKanade(scaledOldFrm, scaledNewFrm, 5, 5, scaledDownPoints)
+			// 	filteredNewCorners := make([][2]float64, 0)
+			// 	for j, point := range newCorners {
+			// 		if invalid[j] {
+			// 			continue
+			// 		}
+			// 		scaledUpPoint := [2]float64{point[0]*factor, point[1]*factor}
+			// 		filteredNewCorners = append(filteredNewCorners, scaledUpPoint)
+			// 	}
+			// 	recentPoints = filteredNewCorners
+			// }
 			
 			// corners, _ := lucasKanade(oldFrm, frame, 5, 5, allCorners[len(allCorners)-1])
 			allCorners = append(allCorners, recentPoints)
