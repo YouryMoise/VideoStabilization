@@ -127,6 +127,9 @@ func (frm *Frame) SetPixelAt(x int, y int, value []float64){
 }
 
 func (frm *Frame) Grayscale() *Frame {
+	if frm.GetChannels() == 1 {
+		return frm
+	}
 	height := frm.GetHeight()
 	width := frm.GetWidth()
 	channels := 1
@@ -304,23 +307,32 @@ func shiTomasi(frm *Frame, windowWidth, windowHeight int) [][2]float64 {
 
 	maxR := float64(0)
 
-	for wx := 0; wx < frameWidth/windowWidth; wx++ {
-		for wy := 0; wy < frameHeight/windowHeight; wy++ {
-			startX := wx*windowWidth
-			startY := wy*windowHeight
+	for x := 0; x < frameWidth; x++ {
+		for y := 0; y < frameHeight; y++ {
 			Ix2Sum := 0.0
 			Iy2Sum := 0.0
 			IxIySum := 0.0
-			for x := startX; x < startX + windowWidth; x++ {
-				for y := startY; y < startY + windowHeight; y++ {
-					Ix2Sum += Ix2.GetPixelAt(x, y)[0]
-					Iy2Sum += Iy2.GetPixelAt(x, y)[0]
-					IxIySum += IxIy.GetPixelAt(x, y)[0]
+			for wx := -windowWidth/2; wx <= windowWidth/2; wx++ {
+				currentX := x+wx
+				if currentX < 0 || currentX >= frameWidth {
+					continue
+				}
+				for wy := -windowHeight/2; wy <= windowHeight/2; wy++ {
+					currentY := y+wy
+					if currentY < 0 || currentY >= frameHeight {
+						continue
+					}
+
+					Ix2Sum += Ix2.GetPixelAt(currentX, currentY)[0]
+					Iy2Sum += Iy2.GetPixelAt(currentX, currentY)[0]
+					IxIySum += IxIy.GetPixelAt(currentX, currentY)[0]
+
 				}
 			}
+			
 			raw_matrix := []float64{Ix2Sum, IxIySum, IxIySum, Iy2Sum}
 			matrix := mat.NewDense(2, 2, raw_matrix)
-
+	
 			var eig mat.Eigen
 			if ok := eig.Factorize(matrix, mat.EigenRight); !ok {
 				log.Fatal("Eigendecomposition failed to converge")
@@ -331,30 +343,104 @@ func shiTomasi(frm *Frame, windowWidth, windowHeight int) [][2]float64 {
 			e1 := cmplx.Abs(eigenvalues[1])
 			currentR := []float64{min(e0, e1)}
 			maxR = max(maxR, currentR[0])
+			// if Ix2Value != 0 && Iy2Value != 0 {
+			// 	fmt.Printf("x %v y %v Ix2 %v Iy2 %v Ixy %v\n",x,y, Ix2Value, Iy2Value, IxIyValue)
+			// 	fmt.Printf("e0 %v e1 %v currentR %v\n", e0, e1, currentR)
+			// }
+			
+			rFrame.SetPixelAt(x,y, currentR)
+			
+		}
+		
+	}
 
-			for x := startX; x < startX + windowWidth; x++ {
-				for y := startY; y < startY + windowHeight; y++ {
-					rFrame.SetPixelAt(x,y, currentR)
+	// for wx := 0; wx < frameWidth/windowWidth; wx++ {
+	// 	for wy := 0; wy < frameHeight/windowHeight; wy++ {
+	// 		startX := wx*windowWidth
+	// 		startY := wy*windowHeight
+	// 		Ix2Sum := 0.0
+	// 		Iy2Sum := 0.0
+	// 		IxIySum := 0.0
+	// 		for x := startX; x < startX + windowWidth; x++ {
+	// 			for y := startY; y < startY + windowHeight; y++ {
+	// 				Ix2Sum += Ix2.GetPixelAt(x, y)[0]
+	// 				Iy2Sum += Iy2.GetPixelAt(x, y)[0]
+	// 				IxIySum += IxIy.GetPixelAt(x, y)[0]
+	// 			}
+	// 		}
+	// 		raw_matrix := []float64{Ix2Sum, IxIySum, IxIySum, Iy2Sum}
+	// 		matrix := mat.NewDense(2, 2, raw_matrix)
+
+	// 		var eig mat.Eigen
+	// 		if ok := eig.Factorize(matrix, mat.EigenRight); !ok {
+	// 			log.Fatal("Eigendecomposition failed to converge")
+	// 		}
+	// 		eigenvalues := eig.Values(nil)
+	// 		// e1 is x changes (vertical edges), e0 is y changes (horizontal edges)
+	// 		e0 := cmplx.Abs(eigenvalues[0])
+	// 		e1 := cmplx.Abs(eigenvalues[1])
+	// 		currentR := []float64{min(e0, e1)}
+	// 		maxR = max(maxR, currentR[0])
+
+	// 		for x := startX; x < startX + windowWidth; x++ {
+	// 			for y := startY; y < startY + windowHeight; y++ {
+	// 				rFrame.SetPixelAt(x,y, currentR)
+	// 			}
+	// 		}
+	// 	}
+	// }
+
+	thresholdR := float64(maxR * 0.1)
+	fmt.Printf("max %v threshold %v\n",maxR, thresholdR)
+	
+	intermediateCoords := make([][3]float64, 0)
+
+	for x := 0; x < frameWidth; x++{
+		fmt.Printf("x %v\n", x)
+		for y := 0; y < frameHeight; y++{
+			rValue := rFrame.GetPixelAt(x,y)[0]
+			valid := true
+			if rValue >= thresholdR {
+				for wx := -windowWidth/2; wx <= windowWidth/2; wx++ {
+					if !valid {
+						break
+					}
+					currentX := x+wx
+					if currentX < 0 || currentX >= frameWidth {
+						continue
+					}
+					for wy := -windowHeight/2; wy <= windowHeight/2; wy++ {
+						currentY := y+wy
+						if currentY < 0 || currentY >= frameHeight {
+							continue
+						}
+						currentValue := rFrame.GetPixelAt(currentX, currentY)[0]
+						if rValue < currentValue {
+							valid = false
+							break
+						}
+					}
+
+				}
+				if valid {
+
+					intermediateCoords = append(intermediateCoords, [3]float64{float64(x), float64(y), rValue})
+
 				}
 			}
 		}
 	}
 
-	thresholdR := float64(maxR * 0.1)
-	fmt.Printf("threshold %v\n", thresholdR)
-	
-	intermediateCoords := make([][3]float64, 0)
-
-	for wx := 0; wx < frameWidth/windowWidth; wx++ {
-		for wy := 0; wy < frameHeight/windowHeight; wy++ {
-			midX := wx*windowWidth + windowWidth/2
-			midY := wy*windowHeight + windowHeight/2
-			rValue := rFrame.GetPixelAt(midX, midY)[0] 
-			if rValue >= thresholdR {
-				intermediateCoords = append(intermediateCoords, [3]float64{float64(midX), float64(midY), rValue})
-			}
-		}
-	}
+	// for wx := 0; wx < frameWidth/windowWidth; wx++ {
+	// 	for wy := 0; wy < frameHeight/windowHeight; wy++ {
+	// 		midX := wx*windowWidth + windowWidth/2
+	// 		midY := wy*windowHeight + windowHeight/2
+	// 		rValue := rFrame.GetPixelAt(midX, midY)[0] 
+	// 		if rValue >= thresholdR {
+	// 			intermediateCoords = append(intermediateCoords, [3]float64{float64(midX), float64(midY), rValue})
+	// 		}
+	// 	}
+	// }
 
 	sort.Slice(intermediateCoords, func(i,j int) bool {
 		return intermediateCoords[i][2] < intermediateCoords[j][2]
@@ -367,6 +453,8 @@ func shiTomasi(frm *Frame, windowWidth, windowHeight int) [][2]float64 {
 		outputCoords[i] = [2]float64{c[0], c[1]}
 	}
 	// var outputCoords [][2]float64 = [][2]float64(intermediateCoords[:100][:2]) 
+	fmt.Printf("output %v\n", outputCoords)
+
 	return outputCoords
 
 }
@@ -470,6 +558,8 @@ func lucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points []
 				log.Fatal("Eigendecomposition failed to converge")
 				continue
 			}
+
+			fmt.Printf("x %v y %v: sumIx2 %v sumIy2 %v sumIxy %v sumIxt %v sumIyt %v\n", x, y, sumIx2, sumIy2, sumIxIy, sumIxIt, sumIyIt)
 			// eigenvalues := eig.Values(nil)
 			
 			// // these are both real and positive
@@ -502,6 +592,7 @@ func lucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points []
 			}
 			xChange := uv.RawVector().Data[0]
 			yChange := uv.RawVector().Data[1]
+			fmt.Printf("xChange %v yChange %v\n", xChange, yChange)
 
 			updatedX := newPoints[index][0] + xChange
 			updatedY := newPoints[index][1] + yChange
@@ -525,6 +616,8 @@ func lucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points []
 		// currentPoints = newPoints
 
 	}
+
+	fmt.Printf("old points %v\nnew points %v\ninvalid %v", points, newPoints, invalid)
 	
 
 	return newPoints, invalid
@@ -551,6 +644,17 @@ func shiftImage(oldFrm *Frame, xChange, yChange float64) *Frame {
 	} 
 	return outputFrm
 
+
+}
+
+func drawRect(frmWidth, frmHeight, width, height, startX, startY int) *Frame {
+	frm := makeFrame(frmWidth, frmHeight, 1) // grayscale by default
+	for x := startX; x < startX + width; x++ {
+		for y := startY; y < startY + height; y++ {
+			frm.SetPixelAt(x,y, []float64{0.5})
+		}
+	}
+	return frm
 
 }
 
@@ -606,9 +710,39 @@ func main() {
 	allCorners := make([][][2]float64,0)
 	// txAverageSum := 0.0
 	// tyAverageSum := 0.0
-	
+
+	frameWidth := 500
+	frameHeight := 150
+	rectWidth := 100
+	rectHeight := 100
+	startX := 5
+	startY := 5
+
+	allTestCorners := make([][][2]float64, 0)
+	for x := startX; x < frameWidth-rectWidth-10; x++ {
+		testCounter := x-startX
+		frm := drawRect(frameWidth, frameHeight, rectWidth, rectHeight, x,startY)
+		if x == startX {
+			testCorners := shiTomasi(frm, 5, 5)
+			allTestCorners = append(allTestCorners, testCorners)
+			displayST(frm, testCorners, 5, 5, testCounter, "draw")
+		} else {
+			testCorners, _ := lucasKanade(oldFrm, frm, 15,15, allTestCorners[len(allTestCorners)-1])
+			allTestCorners = append(allTestCorners, testCorners)
+			displayST(frm, testCorners, 5, 5, testCounter, "draw")
+		}
+		oldFrm = frm
+	}
+	// saveToPNG(img, "draw.png")
+
+	// displayST(frame, corners, 5,5)
+	// displayST(frm, [][2]float64{}, 0, 0, 0, "draw/")
+	return
+
 	for video.Read() {
 		// FrameBuffer returns a byte array of the frame in row-major order (RGBA format)
+		
+		
 		rawFrame := video.FrameBuffer()
 		rawFrameFloats := make([]float64, len(rawFrame))
 		for i := range rawFrameFloats {
