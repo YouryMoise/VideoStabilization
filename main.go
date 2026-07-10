@@ -592,7 +592,7 @@ func lucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points []
 			}
 			xChange := uv.RawVector().Data[0]
 			yChange := uv.RawVector().Data[1]
-			fmt.Printf("i %v index %v xChange %v yChange %v\n",i, index, xChange, yChange)
+			// fmt.Printf("i %v index %v xChange %v yChange %v\n",i, index, xChange, yChange)
 
 			updatedX := newPoints[index][0] + xChange
 			updatedY := newPoints[index][1] + yChange
@@ -630,15 +630,28 @@ func lucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points []
 }
 
 func pyramidalLucasKanade(oldFrm, newFrm *Frame, windowWidth, windowHeight int, points [][2]float64) [][2]float64 {
-	factors := []float64{2,4,8}
-	for index := len(factors)-1; index >= 0; index-- {
-		factor := factors[index]
+	// factors := []float64{2,4,8}
+	base := 2.0
+	pyramidLevels := 3.0
+	for index := pyramidLevels; index >= 1; index-- {
+	// for index := len(factors)-1; index >= 0; index-- {
+		// factor := factors[index]
+		factor := math.Pow(base, index)
 		scaledDownPoints := make([][2]float64, len(points))
 		for i, point := range points {
 			scaledDownPoints[i] = [2]float64{point[0]/factor, point[1]/factor}
 		}
+
+		// scaledOldFrm := oldFrm
+		// scaledNewFrm := newFrm
+		// for i := 0; i < int(index); i++ {
+		// 	scaledOldFrm = scaledOldFrm.Downsample(int(base))
+		// 	scaledNewFrm = scaledNewFrm.Downsample(int(base))
+		// }
+
 		scaledOldFrm := oldFrm.Downsample(int(factor))
 		scaledNewFrm := newFrm.Downsample(int(factor))
+
 		newCorners, _ := lucasKanade(scaledOldFrm, scaledNewFrm, 10, 10, scaledDownPoints)
 		filteredNewCorners := make([][2]float64, 0)
 		for _, point := range newCorners {
@@ -747,6 +760,9 @@ func main() {
 	startY := 5
 
 	allTestCorners := make([][][2]float64, 0)
+	testTxAverage := 0.0
+	testTyAverage := 0.0
+
 	for x := startX; x < frameWidth-rectWidth-10; x++ {
 		testCounter := x-startX
 		frm := drawRect(frameWidth, frameHeight, rectWidth, rectHeight, x,startY)
@@ -756,9 +772,26 @@ func main() {
 			displayST(frm, testCorners, 5, 5, testCounter, "draw")
 		} else {
 			// testCorners, _ := lucasKanade(oldFrm, frm, 10,10, allTestCorners[len(allTestCorners)-1])
-			testCorners := pyramidalLucasKanade(oldFrm, frm, 15,15, allTestCorners[len(allTestCorners)-1])
+			previousCorners := allTestCorners[len(allTestCorners)-1]
+			testCorners := pyramidalLucasKanade(oldFrm, frm, 15,15, previousCorners)
 			allTestCorners = append(allTestCorners, testCorners)
-			displayST(frm, testCorners, 5, 5, testCounter, "draw")
+
+			currentTxAverage := 0.0
+			currentTyAverage := 0.0
+			for index, corner := range testCorners {
+				currentTxAverage += corner[0]-previousCorners[index][0]
+				currentTyAverage += corner[1]-previousCorners[index][1]
+			}
+			currentTxAverage /= float64(len(testCorners))
+			currentTyAverage /= float64(len(testCorners))
+
+			testTxAverage += currentTxAverage
+			testTyAverage += currentTyAverage
+
+			shiftedFrm := shiftImage(frm, -testTxAverage, -testTyAverage)
+
+			displayST(shiftedFrm, testCorners, 5, 5, testCounter, "draw")
+			// displayST(frm, testCorners, 5, 5, testCounter, "draw")
 		}
 		oldFrm = frm
 	}
